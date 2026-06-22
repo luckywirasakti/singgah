@@ -3,9 +3,11 @@ import './style.css'
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <img src="/beach-scene-zoomed.png" alt="Sebuah persinggahan yang damai" class="scene-img" />
 
-  <div class="greeting-overlay">
-    <h1 class="greeting-text"></h1>
-    <p class="greeting-subtext"></p>
+  <div class="greeting-wrap">
+    <div class="greeting-overlay">
+      <h1 class="greeting-text"></h1>
+      <p class="greeting-subtext"></p>
+    </div>
   </div>
 `
 

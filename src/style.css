@@ -37,12 +37,22 @@ body {
 /* ── Greeting card ───────────────────────────────────────────────
    A soft, warm card that matches the clay/pastel tone of the scene:
    creamy translucent surface, gentle warm border, rounded corners. */
-.greeting-overlay {
+/* Full-width centering rail — flex centering works consistently across
+   browsers (incl. Safari), unlike absolute left:50% + translateX. */
+.greeting-wrap {
   position: absolute;
   top: 11%;
-  left: 50%;
-  transform: translateX(-50%);
+  left: 0;
+  right: 0;
   z-index: 10;
+  display: flex;
+  justify-content: center;
+  padding: 0 1rem;
+  pointer-events: none;
+}
+
+.greeting-overlay {
+  max-width: 100%;
   text-align: center;
   background: rgba(255, 251, 244, 0.72);
   backdrop-filter: blur(10px) saturate(1.1);
@@ -96,14 +106,15 @@ body {
 }
 
 @keyframes float {
-  0%, 100% { transform: translateX(-50%) translateY(0); }
-  50% { transform: translateX(-50%) translateY(-12px); }
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-12px); }
 }
 
 @media (max-width: 768px) {
+  .greeting-wrap { top: 20%; }
   .greeting-overlay {
-    top: 20%;
-    padding: 1.4rem 2.4rem;
+    max-width: 300px;
+    padding: 1.4rem 2.2rem;
     border-radius: 999px;
   }
   .greeting-text { font-size: 1.9rem; }
