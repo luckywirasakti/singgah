@@ -25,7 +25,7 @@ body {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  object-position: center 78%;
+  object-position: center 38%;
   position: absolute;
   top: 0;
   left: 0;
@@ -34,14 +34,12 @@ body {
   -webkit-user-drag: none;
 }
 
-/* ── Greeting card ───────────────────────────────────────────────
-   A soft, warm card that matches the clay/pastel tone of the scene:
-   creamy translucent surface, gentle warm border, rounded corners. */
 /* Full-width centering rail — flex centering works consistently across
-   browsers (incl. Safari), unlike absolute left:50% + translateX. */
+   browsers (incl. Safari). The greeting is bare text sitting on the
+   clouds, no card wrapper. */
 .greeting-wrap {
   position: absolute;
-  top: 11%;
+  top: 34%;
   left: 0;
   right: 0;
   z-index: 10;
@@ -54,36 +52,29 @@ body {
 .greeting-overlay {
   max-width: 100%;
   text-align: center;
-  background: rgba(255, 251, 244, 0.72);
-  backdrop-filter: blur(10px) saturate(1.1);
-  -webkit-backdrop-filter: blur(10px) saturate(1.1);
-  padding: 1.6rem 3.4rem;
-  border-radius: 999px;
-  box-shadow:
-    0 18px 40px rgba(70, 110, 150, 0.22),
-    inset 0 1px 0 rgba(255, 255, 255, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.65);
   animation: float 6s ease-in-out infinite;
-  pointer-events: none;
 }
 
+/* heading and body kept close in size for a soft, even rhythm */
 .greeting-text {
   font-family: 'Fredoka', sans-serif;
-  font-size: 2.5rem;
+  font-size: 1.85rem;
   font-weight: 600;
   color: #2b6ea3;
   letter-spacing: 0.3px;
-  margin-bottom: 0.45rem;
-  min-height: 1.2em; /* reserve the line so the oval doesn't pop in */
+  margin-bottom: 0.3rem;
+  min-height: 1.2em;
+  text-shadow: 0 2px 12px rgba(255, 255, 255, 0.9), 0 1px 3px rgba(255, 255, 255, 0.8);
 }
 
 .greeting-subtext {
   font-family: 'Fredoka', sans-serif;
-  font-size: 1.18rem;
-  font-weight: 400;
-  color: #5a7a93;
-  line-height: 1.55;
-  min-height: 1.6em; /* reserve one line while typing */
+  font-size: 1.4rem;
+  font-weight: 500;
+  color: #4d7392;
+  line-height: 1.5;
+  min-height: 1.5em;
+  text-shadow: 0 2px 12px rgba(255, 255, 255, 0.9), 0 1px 3px rgba(255, 255, 255, 0.8);
 }
 
 /* blinking caret on whichever line is currently typing */
@@ -111,12 +102,8 @@ body {
 }
 
 @media (max-width: 768px) {
-  .greeting-wrap { top: 20%; }
-  .greeting-overlay {
-    max-width: 300px;
-    padding: 1.4rem 2.2rem;
-    border-radius: 999px;
-  }
-  .greeting-text { font-size: 1.9rem; }
-  .greeting-subtext { font-size: 1rem; }
+  .greeting-wrap { top: 40%; }
+  .greeting-overlay { max-width: 340px; }
+  .greeting-text { font-size: 1.55rem; }
+  .greeting-subtext { font-size: 1.15rem; }
 }

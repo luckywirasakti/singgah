@@ -1,4 +1,5 @@
 import './style.css'
+import { initOpenSound } from './sound'
 
 document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
   <img src="/beach-scene-zoomed.png" alt="Sebuah persinggahan yang damai" class="scene-img" />
@@ -14,8 +15,8 @@ document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
 const heading = document.querySelector<HTMLHeadingElement>('.greeting-text')!
 const subtext = document.querySelector<HTMLParagraphElement>('.greeting-subtext')!
 
-const HEADING_TEXT = 'Sebuah Persinggahan'
-const SUBTEXT_TEXT = 'Terima kasih telah mampir ke sini. 👋'
+const HEADING_TEXT = 'Singgah Dulu, Yuk'
+const SUBTEXT_TEXT = 'Biar penat luruh dibawa ombak. 👋'
 
 /** Types `text` into `el` one character at a time, showing a blinking caret. */
 function typeInto(el: HTMLElement, text: string, speed: number): Promise<void> {
@@ -45,3 +46,6 @@ async function run() {
 
 // small delay so the scene settles before the greeting starts typing
 setTimeout(run, 500)
+
+// gentle arrival chime + ocean wash when the page opens
+initOpenSound()
