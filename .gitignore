@@ -9,8 +9,17 @@ lerna-debug.log*
 
 node_modules
 dist
+dist-server
 dist-ssr
 *.local
+
+# Generated at runtime by the proxy
+tunnel-names.json
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
 
 # Editor directories and files
 .vscode/*

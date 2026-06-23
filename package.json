@@ -6,9 +6,14 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "build:server": "tsc -p tsconfig.server.json",
+    "build:all": "npm run build && npm run build:server",
+    "preview": "vite preview",
+    "proxy:dev": "node --experimental-strip-types --watch server/proxy.ts",
+    "start": "node dist-server/proxy.js"
   },
   "devDependencies": {
+    "@types/node": "^22.12.0",
     "typescript": "~6.0.2",
     "vite": "^8.0.12"
   }
