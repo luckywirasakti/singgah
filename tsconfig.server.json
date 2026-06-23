@@ -8,6 +8,10 @@
 
     "outDir": "dist-server",
     "rootDir": "server",
+    // Allow `import './registry.ts'`: Node's type-stripping loads the .ts at
+    // runtime (proxy:dev), while tsc rewrites the specifier to .js on emit.
+    "allowImportingTsExtensions": true,
+    "rewriteRelativeImportExtensions": true,
     "strict": true,
     "skipLibCheck": true,
     "esModuleInterop": true,

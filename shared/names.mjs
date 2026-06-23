@@ -47,6 +47,22 @@ export function nameForPort(port, base = DEFAULT_BASE) {
 }
 
 /**
+ * A random friendly name drawn from the same noun×adjective vocabulary.
+ *
+ * Unlike {@link nameForPort}, this is NOT tied to a port — it's used by the CLI
+ * to pick a fresh, dynamic subdomain at request time. Uniqueness against live
+ * tunnels is enforced by the server registry (which rejects collisions), so the
+ * caller should retry with a new name on conflict.
+ *
+ * @returns {string} a `noun-adj` name (one of POOL_SIZE possibilities).
+ */
+export function randomName() {
+  const noun = NOUNS[Math.floor(Math.random() * NOUNS.length)];
+  const adjective = ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)];
+  return `${noun}-${adjective}`;
+}
+
+/**
  * @param {string} name
  * @param {number} [base]
  * @returns {number | null} the tunnel port, or null if the name isn't a valid pair.
@@ -64,6 +80,7 @@ export function portForName(name, base = DEFAULT_BASE) {
 // Used by the bash client so it shares this exact logic:
 //   node names.mjs <port> [base]   → prints the name (exit 1 if out of range)
 //   node names.mjs --size          → prints POOL_SIZE
+//   node names.mjs --random        → prints a fresh random name
 import { pathToFileURL } from 'node:url';
 
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
@@ -71,6 +88,10 @@ if (isMain) {
   const arg = process.argv[2];
   if (arg === '--size') {
     process.stdout.write(`${POOL_SIZE}\n`);
+    process.exit(0);
+  }
+  if (arg === '--random') {
+    process.stdout.write(`${randomName()}\n`);
     process.exit(0);
   }
   const port = Number(arg);

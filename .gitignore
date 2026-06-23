@@ -18,6 +18,9 @@ dist-ssr
 .env.*
 !.env.example
 
+# Dynamic-name registry (proxy runtime state)
+singgah-registry.json
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
