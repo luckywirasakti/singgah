@@ -4,53 +4,79 @@
 
 Expose any local port to the internet over a plain SSH reverse tunnel — no
 third-party tunneling service, no agent to install. A small Node proxy on your
-server routes friendly subdomains (`panggung.example.com`) to whichever local
-app you've tunneled, and serves a static landing page when nothing is connected.
-
-> **This is the server side** — the proxy and the landing page. The client CLI
-> you run on your laptop lives in its own repo: **singgah-cli**.
+server routes friendly subdomains (`panggung-biru.example.com`) to whichever
+local app you've tunneled, and serves a static landing page when nothing is
+connected.
 
 ```
-┌──────────────┐   ssh -R 9000:localhost:5173   ┌──────────────────────────┐
+┌──────────────┐   ssh -R 9001:localhost:5173   ┌──────────────────────────┐
 │  your laptop │ ─────────────────────────────▶ │  server                  │
-│  :5173 (app) │                                │  server/proxy.ts   :3000 │
-└──────────────┘                                │   ├─ :9000 ─▶ your app    │
+│  :5173 (app) │   (cli/singgah.sh)             │  server/proxy.ts   :3000 │
+└──────────────┘                                │   ├─ :9001 ─▶ your app    │
                                                 │   └─ static fallback     │
-        https://panggung.example.com ◀──────────┤  (behind Nginx/Caddy)    │
+     https://panggung-hijau.example.com ◀───────┤  (behind Nginx/Caddy)    │
                                                 └──────────────────────────┘
 ```
 
 ## Project layout
 
 ```
-src/            frontend landing page (Vite + TypeScript)
-server/proxy.ts the reverse-tunnel proxy (Node, TypeScript)
-tunnel-names.json  generated name → port map (runtime output, for the CLI)
+src/             frontend landing page (Vite + TypeScript)
+server/proxy.ts  the reverse-tunnel proxy (Node, TypeScript)
+shared/names.mjs deterministic port ↔ name mapping (used by proxy AND cli)
+cli/singgah.sh   the client that opens the SSH tunnel
 ```
 
-Both halves share one repo and one toolchain. The frontend builds to `dist/`;
-the proxy builds to `dist-server/` and serves `dist/` as its fallback.
+One repo, one toolchain. The frontend builds to `dist/`; the proxy builds to
+`dist-server/` and serves `dist/` as its fallback. The proxy and the CLI both
+use `shared/names.mjs`, so they always agree on names with no stored state.
 
 ## How it works
 
-1. `singgah <port>` opens an SSH reverse tunnel from your machine to a tunnel
-   port (9000–9015) on the server.
-2. The proxy (`server/proxy.ts`) continuously scans those ports, and routes
-   inbound HTTP by the `Host` header:
+1. `cli/singgah.sh <port>` opens an SSH reverse tunnel from your machine to a
+   tunnel port on the server (e.g. `9001`).
+2. The proxy (`server/proxy.ts`) routes inbound HTTP by the `Host` header:
    - `example.com` / `www.example.com` → `DEFAULT_PORT`
    - `9001.example.com` → numeric tunnel port `9001`
-   - `panggung.example.com` → port resolved from the generated name map (see [Friendly names](#friendly-names))
-3. If no live tunnel matches, the proxy serves the built static site from
-   `STATIC_DIR` (with SPA fallback to `index.html`).
+   - `panggung-hijau.example.com` → port derived from [`shared/names.mjs`](shared/names.mjs)
+3. It then forwards to that local port. If nothing is listening, it serves the
+   built static site from `STATIC_DIR` (with SPA fallback to `index.html`).
 
 A TLS terminator (Nginx, Caddy, …) should sit in front of the proxy and forward
 plain HTTP to `PROXY_PORT`.
 
+## Names (no file, no scanning)
+
+Subdomain names are **computed on the fly** by a pure function shared between
+the proxy and the CLI — there is no names file and no background port scanner.
+
+The mapping is a deterministic, bijective noun×adjective matrix anchored at
+`PORT_BASE`:
+
+```
+9000 → panggung-biru     9001 → panggung-hijau     9255 → tangga-fajar
+```
+
+- The proxy turns an incoming `noun-adj` subdomain back into a port.
+- The CLI turns an assigned port into the same `noun-adj` name to print the URL
+  (`node shared/names.mjs <port>`).
+
+Because both sides call the *same* module, they can never disagree — and nothing
+needs to be persisted or fetched.
+
+### The window is also a security allowlist
+
+The pool holds `POOL_SIZE` (256) names, so only ports in
+`[PORT_BASE, PORT_BASE + 256)` are ever addressable. A crafted subdomain can't
+be mapped to an out-of-window port, so it can't reach local services like SSH
+(`:22`) or a database. There is **no max to configure** — the top of the window
+follows the pool size automatically. Set `PORT_BASE` to move the whole window.
+
 ## Requirements
 
-- Node.js ≥ 22 (built-in `.env` loader and native TS type-stripping for `proxy:dev`)
+- Node.js ≥ 22 — server (built-in `.env` loader, native TS type-stripping) and
+  client (the CLI calls `node` for name resolution)
 - An SSH server with `GatewayPorts clientspecified` enabled
-- The **singgah-cli** client on the machines that open tunnels
 
 ## Configuration
 
@@ -63,28 +89,39 @@ $EDITOR .env
 ```
 
 `.env` is gitignored. **Never commit real IPs or domains.** See
-[.env.example](.env.example) for every variable and its default.
+[.env.example](.env.example) for every variable.
 
-| Variable         | Required | Default               |
-| ---------------- | -------- | --------------------- |
-| `DOMAIN`         | ✅       | —                     |
-| `PROXY_PORT`     |          | `3000`                |
-| `BIND_HOST`      |          | `0.0.0.0`             |
-| `STATIC_DIR`     |          | `./dist`              |
-| `NAMES_FILE`     |          | `./tunnel-names.json` |
-| `TUNNEL_MIN/MAX` |          | `9000` / `9015`       |
-| `DEFAULT_PORT`   |          | `9000`                |
+| Variable         | Side   | Required | Default     |
+| ---------------- | ------ | -------- | ----------- |
+| `DOMAIN`         | proxy  | ✅       | —           |
+| `PORT_BASE`      | proxy  |          | `9000`      |
+| `DEFAULT_PORT`   | proxy  |          | `PORT_BASE` |
+| `PROXY_PORT`     | proxy  |          | `3000`      |
+| `BIND_HOST`      | proxy  |          | `0.0.0.0`   |
+| `STATIC_DIR`     | proxy  |          | `./dist`    |
+| `SINGGAH_SERVER` | cli    | ✅       | —           |
+| `SINGGAH_DOMAIN` | cli    | ✅       | —           |
+| `SINGGAH_USER`   | cli    |          | `ubuntu`    |
+| `SINGGAH_BASE`   | cli    |          | `9000`      |
+
+> `SINGGAH_BASE` (client) must equal `PORT_BASE` (server) — otherwise the two
+> sides compute different names for the same port.
 
 ## Usage
 
 ### Client
 
-The client CLI lives in the **singgah-cli** repo. Install it on any machine you
-want to tunnel from, then:
+```bash
+./cli/singgah.sh 5173              # auto-assign a tunnel port
+./cli/singgah.sh 3001 --port 9002  # force a specific tunnel port
+./cli/singgah.sh list              # show active tunnels
+./cli/singgah.sh --help
+```
+
+Symlink it onto your `PATH` for convenience:
 
 ```bash
-singgah 5173      # → https://panggung.example.com
-singgah list      # show active tunnels
+ln -s "$PWD/cli/singgah.sh" /usr/local/bin/singgah
 ```
 
 ### Server (proxy)
@@ -129,27 +166,6 @@ WantedBy=multi-user.target
 sudo systemctl enable --now singgah-proxy
 ```
 
-### Friendly names
-
-Names are **generated automatically** to match the tunnel range — no file to
-hand-edit. The proxy takes an ordered pool of names and maps the Nth name to
-`TUNNEL_MIN + N`, so a range of 16 ports yields 16 names, a range of 20 yields
-20, and so on.
-
-- Default pool: a built-in set of Indonesian "place" names
-  (`panggung`, `dapur`, `loteng`, …).
-- Override with the `TUNNEL_NAMES` env (comma-separated, ordered):
-
-  ```bash
-  TUNNEL_NAMES=alpha,beta,gamma  # alpha→9000, beta→9001, gamma→9002
-  ```
-
-On startup the proxy writes the resulting map to `NAMES_FILE`
-(`tunnel-names.json`) so the **singgah-cli** client can resolve names. That file
-is generated — it's gitignored and should not be edited by hand. If the pool is
-smaller than the range, the extra ports stay reachable by number
-(`9015.example.com`).
-
 ## npm scripts
 
 | Script                | What it does                                       |
@@ -164,11 +180,12 @@ smaller than the range, the extra ports stay reachable by number
 ## Security notes
 
 - Secrets live only in `.env`; the proxy refuses to start without `DOMAIN`.
+- Subdomains map only to ports in `[PORT_BASE, PORT_BASE + 256)`, so they can't
+  reach arbitrary local services. Keep that window firewalled to localhost on
+  the server so tunnels aren't reachable directly.
 - Static serving is hardened against path traversal — requests escaping
   `STATIC_DIR` fall back to the SPA shell.
 - Hop-by-hop headers are stripped when proxying (RFC 7230 §6.1).
-- The proxy only exposes ports in `[TUNNEL_MIN, TUNNEL_MAX]`; keep that range
-  firewalled to localhost on the server so tunnels aren't reachable directly.
 
 ## License
 

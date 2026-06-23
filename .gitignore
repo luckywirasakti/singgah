@@ -13,9 +13,6 @@ dist-server
 dist-ssr
 *.local
 
-# Generated at runtime by the proxy
-tunnel-names.json
-
 # Environment / secrets
 .env
 .env.*

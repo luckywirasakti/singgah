@@ -4,21 +4,25 @@
  *
  * Routes inbound HTTP requests to local SSH reverse-tunnel ports based on the
  * Host header, and falls back to serving the built Vite site when no live
- * tunnel matches.
+ * tunnel answers.
  *
- *   root / www            → DEFAULT_PORT
- *   <9000-9015>.<domain>  → that numeric tunnel port
- *   <name>.<domain>       → port resolved from NAMES_FILE
+ *   root / www              → DEFAULT_PORT
+ *   <port>.<domain>         → that numeric tunnel port (within the window)
+ *   <noun>-<adj>.<domain>   → port derived from the shared name module
+ *
+ * Names are generated on the fly from a deterministic noun×adjective matrix
+ * (see ../shared/names.mjs) shared with the CLI — no file, no scanning. The
+ * addressable window [PORT_BASE, PORT_BASE + POOL_SIZE) doubles as a security
+ * allowlist so crafted subdomains can't reach arbitrary local services.
  *
  * Configuration is supplied entirely through the environment (see .env.example).
- * No hostnames, domains or IPs are hard-coded.
  */
 
 import http from 'node:http';
-import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
-import net from 'node:net';
+
+import { nameForPort, portForName, POOL_SIZE, DEFAULT_BASE } from '../shared/names.mjs';
 
 // Load .env from the working directory if present (Node >=20.12).
 try {
@@ -60,20 +64,17 @@ const CONFIG = Object.freeze({
   bindHost: process.env.BIND_HOST || '0.0.0.0',
   staticDir: path.resolve(process.env.STATIC_DIR || path.join(ROOT, 'dist')),
   domain: requireEnv('DOMAIN'),
-  tunnelMin: intEnv('TUNNEL_MIN', 9000),
-  tunnelMax: intEnv('TUNNEL_MAX', 9015),
-  defaultPort: intEnv('DEFAULT_PORT', 9000),
-  namesFile: path.resolve(process.env.NAMES_FILE || path.join(ROOT, 'tunnel-names.json')),
+  // Base of the addressable tunnel window. The top is derived from the name
+  // pool size, so there is no max to configure.
+  portBase: intEnv('PORT_BASE', DEFAULT_BASE),
   tunnelHost: process.env.TUNNEL_HOST || '127.0.0.1',
-  scanIntervalMs: intEnv('SCAN_INTERVAL_MS', 2000),
-  scanTimeoutMs: intEnv('SCAN_TIMEOUT_MS', 500),
   proxyTimeoutMs: intEnv('PROXY_TIMEOUT_MS', 30000),
 });
 
-if (CONFIG.tunnelMin > CONFIG.tunnelMax) {
-  console.error('[config] TUNNEL_MIN must be <= TUNNEL_MAX');
-  process.exit(1);
-}
+const PORT_MIN = CONFIG.portBase;
+const PORT_MAX = CONFIG.portBase + POOL_SIZE - 1;
+// Port served for the apex / www domain (defaults to the base of the window).
+const DEFAULT_PORT = intEnv('DEFAULT_PORT', CONFIG.portBase);
 
 const MIME_TYPES: Record<string, string> = Object.freeze({
   '.html': 'text/html; charset=utf-8',
@@ -120,117 +121,32 @@ function log(level: Level, message: string, meta?: Record<string, unknown>): voi
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// Name → port mapping (generated from the tunnel range)
-// ──────────────────────────────────────────────────────────────────────────
-
-// Ordered pool of friendly subdomain names, themed around places you "singgah".
-// The Nth name maps to TUNNEL_MIN + N, so the number of names always tracks the
-// configured range. Override the pool with the TUNNEL_NAMES env (comma-separated).
-const DEFAULT_NAME_POOL = [
-  'panggung', 'dapur', 'loteng', 'gudang', 'taman', 'pelabuhan', 'mercusuar',
-  'genting', 'halaman', 'balkon', 'pantai', 'teras', 'beranda', 'serambi',
-  'lorong', 'tangga', 'jendela', 'pintu', 'sumur', 'kolam', 'gerbang', 'menara',
-  'bukit', 'lembah', 'sungai', 'danau', 'hutan', 'ladang', 'sawah', 'kebun',
-];
-
-function buildNamePool(): string[] {
-  const raw = process.env.TUNNEL_NAMES;
-  if (!raw || !raw.trim()) return DEFAULT_NAME_POOL;
-  return raw.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
-}
-
-/** name → port, e.g. { panggung: 9000, dapur: 9001, ... } */
-let nameMap: Record<string, number> = Object.create(null);
-
-function buildNames(): void {
-  const pool = buildNamePool();
-  const slots = CONFIG.tunnelMax - CONFIG.tunnelMin + 1;
-  const next: Record<string, number> = Object.create(null);
-  for (let i = 0; i < slots; i++) {
-    const name = pool[i];
-    if (name) next[name] = CONFIG.tunnelMin + i;
-  }
-  nameMap = next;
-
-  const named = Object.keys(nameMap).length;
-  log('info', 'tunnel names generated', { slots, named });
-  if (named < slots) {
-    log('warn', 'name pool smaller than tunnel range; extra ports are numeric-only', {
-      missing: slots - named,
-    });
-  }
-}
-
-// Best-effort: publish the mapping so the singgah-cli client can resolve names
-// without a separate source of truth. Failure here is non-fatal.
-function writeNamesFile(): void {
-  try {
-    fs.writeFileSync(CONFIG.namesFile, `${JSON.stringify(nameMap, null, 2)}\n`);
-    log('info', 'names file written', { file: CONFIG.namesFile });
-  } catch (err) {
-    log('warn', 'could not write names file (CLI name resolution may be stale)', {
-      file: CONFIG.namesFile,
-      error: (err as Error).message,
-    });
-  }
-}
-
-buildNames();
-writeNamesFile();
-
-// ──────────────────────────────────────────────────────────────────────────
-// Tunnel liveness scanning
-// ──────────────────────────────────────────────────────────────────────────
-
-const tunnelAlive = new Set<number>();
-
-function probePort(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = new net.Socket();
-    const finish = (alive: boolean) => {
-      socket.destroy();
-      resolve(alive);
-    };
-    socket.setTimeout(CONFIG.scanTimeoutMs);
-    socket.once('connect', () => finish(true));
-    socket.once('error', () => finish(false));
-    socket.once('timeout', () => finish(false));
-    socket.connect(port, CONFIG.tunnelHost);
-  });
-}
-
-async function scanTunnels(): Promise<void> {
-  const ports: number[] = [];
-  for (let p = CONFIG.tunnelMin; p <= CONFIG.tunnelMax; p++) ports.push(p);
-  const results = await Promise.all(ports.map(probePort));
-  ports.forEach((port, i) => {
-    if (results[i]) tunnelAlive.add(port);
-    else tunnelAlive.delete(port);
-  });
-}
-
-// ──────────────────────────────────────────────────────────────────────────
 // Routing
 // ──────────────────────────────────────────────────────────────────────────
 
+const inWindow = (port: number): boolean => port >= PORT_MIN && port <= PORT_MAX;
+
 /** Resolve a tunnel port from the Host header, or null when no route matches. */
 function resolvePort(rawHost: string): number | null {
-  if (!rawHost) return CONFIG.defaultPort;
+  if (!rawHost) return DEFAULT_PORT;
   const host = rawHost.replace(/:\d+$/, '').toLowerCase();
 
   if (host === CONFIG.domain || host === `www.${CONFIG.domain}`) {
-    return CONFIG.defaultPort;
+    return DEFAULT_PORT;
   }
 
   const suffix = `.${CONFIG.domain}`;
   if (!host.endsWith(suffix)) return null;
 
   const sub = host.slice(0, -suffix.length);
+
+  // Numeric subdomain (e.g. 9000.example.com) — only inside the window.
   const num = Number.parseInt(sub, 10);
-  if (String(num) === sub && num >= CONFIG.tunnelMin && num <= CONFIG.tunnelMax) {
-    return num;
-  }
-  return nameMap[sub] ?? null;
+  if (String(num) === sub) return inWindow(num) ? num : null;
+
+  // Friendly name (e.g. panggung-biru.example.com).
+  const port = portForName(sub, CONFIG.portBase);
+  return port !== null && inWindow(port) ? port : null;
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -245,6 +161,8 @@ function sanitizeHeaders(headers: http.IncomingHttpHeaders | http.OutgoingHttpHe
   return clean;
 }
 
+// We don't pre-scan tunnels; we attempt the upstream and fall back to the static
+// site if nothing is listening. On localhost a refused connection is instant.
 function proxyRequest(req: http.IncomingMessage, res: http.ServerResponse, port: number): void {
   const proxyReq = http.request(
     {
@@ -263,7 +181,7 @@ function proxyRequest(req: http.IncomingMessage, res: http.ServerResponse, port:
 
   proxyReq.on('timeout', () => proxyReq.destroy(new Error('upstream timeout')));
   proxyReq.on('error', (err) => {
-    log('warn', 'proxy upstream error, serving static fallback', { port, error: err.message });
+    log('warn', 'no live tunnel, serving static fallback', { port, error: err.message });
     if (!res.headersSent) void serveStatic(req, res);
   });
 
@@ -324,7 +242,7 @@ const server = http.createServer((req, res) => {
   const tunnelPort = resolvePort(req.headers.host || '');
   res.setHeader('X-Tunnel-Port', tunnelPort !== null ? String(tunnelPort) : 'none');
 
-  if (tunnelPort !== null && tunnelAlive.has(tunnelPort)) {
+  if (tunnelPort !== null) {
     proxyRequest(req, res, tunnelPort);
   } else {
     serveStatic(req, res).catch((err: Error) => {
@@ -341,19 +259,14 @@ server.on('clientError', (_err, socket) => {
   if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
 });
 
-let scanTimer: NodeJS.Timeout | null = null;
-
 server.listen(CONFIG.port, CONFIG.bindHost, () => {
   log('info', 'proxy listening', {
     address: `${CONFIG.bindHost}:${CONFIG.port}`,
     domain: CONFIG.domain,
-    tunnelRange: `${CONFIG.tunnelMin}-${CONFIG.tunnelMax}`,
-    names: Object.keys(nameMap).length,
+    window: `${PORT_MIN}-${PORT_MAX}`,
+    names: POOL_SIZE,
+    example: `${nameForPort(PORT_MIN, CONFIG.portBase)}.${CONFIG.domain}`,
   });
-  scanTunnels().catch((err: Error) => log('error', 'scan failed', { error: err.message }));
-  scanTimer = setInterval(() => {
-    scanTunnels().catch((err: Error) => log('error', 'scan failed', { error: err.message }));
-  }, CONFIG.scanIntervalMs);
 });
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -365,7 +278,6 @@ function shutdown(signal: string): void {
   if (shuttingDown) return;
   shuttingDown = true;
   log('info', 'shutting down', { signal });
-  if (scanTimer) clearInterval(scanTimer);
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(1), 10000).unref();
 }
